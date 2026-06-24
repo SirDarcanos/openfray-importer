@@ -285,9 +285,11 @@ const isSpellcastingLeadIn = (e: NameAndContent): boolean =>
   /spellcasting/i.test(e.Name) || /spellcasting ability/i.test(e.Content);
 
 /** Spell hover-cards / cast mechanics resolve against OpenFray's bundled compendium,
- *  which ships only SRD 5.2 — so spell refs point there regardless of the creature's
- *  edition (spell names are stable across editions; 5.1-only refs wouldn't resolve). */
-const SPELL_REF_SRC = "srd-5.2";
+ *  which ships both SRD 5.2 (2024) and SRD 5.1 (2014). Point a creature's spells at the
+ *  library matching its edition so the lookup hits the right entry — a 5.0 creature's
+ *  spells are 2014 spells. */
+const spellRefSource = (edition: Edition): string =>
+  edition === "5.0" ? "srd-5.1" : "srd-5.2";
 
 // Words kept lowercase in a title-cased spell name ("Cone of Cold", "Wall of Force").
 const MINOR_WORD = new Set(["of", "the", "and", "a", "an", "to", "in", "on", "or", "from", "with"]);
@@ -306,29 +308,29 @@ function titleCaseSpell(name: string): string {
 /** One spell reference from a raw list entry. The display name is title-cased (2014
  *  blocks list spells lowercase; 2024 already capitalized) and keeps any trailing "*"
  *  marker; the compendium ref slugs the de-asterisked name. */
-function spellRef(raw: string): SpellRef {
+function spellRef(raw: string, refSrc: string): SpellRef {
   const display = titleCaseSpell(
     raw.trim().replace(/\s*\([^)]*\)\s*$/, "").replace(/\.$/, "").trim(),
   );
   return {
     name: display,
-    ref: `${SPELL_REF_SRC}:${slugify(display.replace(/\*+$/, "").trim())}`,
+    ref: `${refSrc}:${slugify(display.replace(/\*+$/, "").trim())}`,
   };
 }
 
-const toSpellRefs = (names: string[]): SpellRef[] =>
-  names.map((n) => n.trim()).filter(Boolean).map(spellRef);
+const toSpellRefs = (names: string[], refSrc: string): SpellRef[] =>
+  names.map((n) => n.trim()).filter(Boolean).map((n) => spellRef(n, refSrc));
 
 /** Split a "At Will: a, b 1/Day: c" blob into usage-grouped spells. Tolerates the
  *  tiers being run together by the scraper ("…Mage Hand, Message1/Day: Lightning Bolt"). */
-function parseSpellGroups(blob: string): SpellGroup[] {
+function parseSpellGroups(blob: string, refSrc: string): SpellGroup[] {
   const groups: SpellGroup[] = [];
   const markers = [...blob.matchAll(TIER_MARKER_RE)];
   for (let i = 0; i < markers.length; i++) {
     const header = markers[i][1].toLowerCase();
     const start = markers[i].index! + markers[i][0].length;
     const end = i + 1 < markers.length ? markers[i + 1].index! : blob.length;
-    const spells = toSpellRefs(blob.slice(start, end).split(","));
+    const spells = toSpellRefs(blob.slice(start, end).split(","), refSrc);
     if (spells.length === 0) continue;
 
     let usage: SpellUsage;
@@ -351,6 +353,7 @@ function parseSpellGroups(blob: string): SpellGroup[] {
  */
 function extractSpellcasting(
   entries: NameAndContent[],
+  refSrc: string,
 ): { spellcasting?: Spellcasting; rest: NameAndContent[] } {
   const idx = entries.findIndex(isSpellcastingLeadIn);
   if (idx < 0) return { rest: entries };
@@ -380,7 +383,7 @@ function extractSpellcasting(
   // Fallback: some layouts keep the whole list in the lead-in's own content.
   if (!blob.trim()) blob = leadIn.Content;
 
-  const groups = parseSpellGroups(blob);
+  const groups = parseSpellGroups(blob, refSrc);
   const rest = entries.filter((e) => !consumed.has(e));
 
   if (groups.length === 0 && !ability && saveDc == null) {
@@ -409,6 +412,7 @@ const AT_WILL_PHRASE_RE = /can (?:innately )?cast ([^.\n]+?) at will/i;
  */
 function extractSpellcastingFromTraits(
   traits: NameAndContent[],
+  refSrc: string,
 ): { spellcasting?: Spellcasting; rest: NameAndContent[] } {
   const idx = traits.findIndex(
     (t) =>
@@ -432,20 +436,20 @@ function extractSpellcastingFromTraits(
   if (/\(\s*\d+\s*slots?\s*\)/i.test(text)) {
     const atWill: SpellRef[] = [];
     const phrase = AT_WILL_PHRASE_RE.exec(text);
-    if (phrase) atWill.push(...toSpellRefs(phrase[1].split(/,|\band\b/i)));
+    if (phrase) atWill.push(...toSpellRefs(phrase[1].split(/,|\band\b/i), refSrc));
     const cantrips = CANTRIP_RE.exec(text);
-    if (cantrips) atWill.push(...toSpellRefs(cantrips[1].split(",")));
+    if (cantrips) atWill.push(...toSpellRefs(cantrips[1].split(","), refSrc));
     if (atWill.length) groups.push({ usage: { type: "atWill" }, spells: atWill });
 
     for (const m of text.matchAll(SLOT_LINE_RE)) {
       const level = Number(m[1]);
-      const spells = toSpellRefs(m[3].split(","));
+      const spells = toSpellRefs(m[3].split(","), refSrc);
       if (spells.length === 0) continue;
       groups.push({ usage: { type: "slots", level }, spells });
       slots[String(level) as SpellLevel] = Number(m[2]);
     }
   } else {
-    groups.push(...parseSpellGroups(text));
+    groups.push(...parseSpellGroups(text, refSrc));
   }
 
   if (groups.length === 0 && !ability && saveDc == null) return { rest: traits };
@@ -605,14 +609,15 @@ export function statBlockToCreature(sb: StatBlock, opts: ConvertOptions = {}): C
 
   // Spellcasting lives in a trait (2014) or an action (2024); lift whichever exists
   // into a structured block and drop it from the rendered traits/actions.
+  const refSrc = spellRefSource(edition);
   const { spellcasting: traitSpellcasting, rest: restTraits } =
-    extractSpellcastingFromTraits(sb.Traits ?? []);
+    extractSpellcastingFromTraits(sb.Traits ?? [], refSrc);
   const traits: Trait[] = restTraits
     .filter((t) => t.Name.trim())
     .map((t) => ({ name: t.Name.trim(), text: t.Content.trim() }));
   if (traits.length) creature.traits = traits;
 
-  const { spellcasting: actionSpellcasting, rest } = extractSpellcasting(sb.Actions ?? []);
+  const { spellcasting: actionSpellcasting, rest } = extractSpellcasting(sb.Actions ?? [], refSrc);
   const actions = namedActions(rest);
   if (actions.length) creature.actions = actions;
   const spellcasting = actionSpellcasting ?? traitSpellcasting;

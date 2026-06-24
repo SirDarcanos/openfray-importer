@@ -291,12 +291,13 @@ test("2014 slot spellcasting (Archmage trait): structured slots + at-will, trait
   ]);
 
   // First slot group: 1st level; the "*" marker is kept on the display name but the
-  // ref slugs the de-asterisked name.
+  // ref slugs the de-asterisked name. A 2014 creature's spells point at the SRD 5.1 library.
   assert.deepEqual(sc.groups[1].usage, { type: "slots", level: 1 });
   assert.deepEqual(sc.groups[1].spells.map((s) => s.name), [
     "Detect Magic", "Identify", "Mage Armor*", "Magic Missile",
   ]);
-  assert.equal(sc.groups[1].spells[2].ref, "srd-5.2:mage-armor");
+  assert.equal(sc.groups[1].spells[2].ref, "srd-5.1:mage-armor");
+  assert.equal(sc.groups[0].spells[0].ref, "srd-5.1:disguise-self");
 
   // Per-level slot maxes.
   assert.deepEqual(sc.slots, { "1": 4, "2": 3, "3": 3, "9": 1 });
@@ -340,6 +341,35 @@ test("legendary actions: per-round budget + (Costs N Actions) in name or split b
   // The cost marker is stripped from the displayed prose, not left in the text.
   assert.match(la.actions[2].text!, /^A gust of frozen wind/);
   assert.doesNotMatch(la.actions[1].name, /Costs/);
+});
+
+test("spell refs follow the creature's edition (2014 → srd-5.1, 2024 → srd-5.2)", () => {
+  const traits = [
+    {
+      Name: "Innate Spellcasting",
+      Content:
+        "The creature's innate spellcasting ability is Charisma (spell save DC 14). It can innately cast the following spells:\n\nAt will: cone of cold, gust of wind",
+    },
+  ];
+  // 2014: no InitiativeModifier → edition 5.0.
+  const c14 = statBlockToCreature(statBlock({ Name: "Jack Frost", Traits: traits }));
+  assert.equal(c14.edition, "5.0");
+  assert.deepEqual(
+    c14.spellcasting?.groups[0].spells.map((s) => s.ref),
+    ["srd-5.1:cone-of-cold", "srd-5.1:gust-of-wind"],
+  );
+
+  // 2024: an InitiativeModifier marks the 2024 layout → edition 5.5.
+  const c24 = statBlockToCreature(statBlock({ Name: "Jack Frost", InitiativeModifier: 0, Traits: traits }));
+  assert.equal(c24.edition, "5.5");
+  assert.deepEqual(
+    c24.spellcasting?.groups[0].spells.map((s) => s.ref),
+    ["srd-5.2:cone-of-cold", "srd-5.2:gust-of-wind"],
+  );
+
+  // An explicit edition override wins.
+  const cForced = statBlockToCreature(statBlock({ Name: "Jack Frost", Traits: traits }), { edition: "5.5" });
+  assert.equal(cForced.spellcasting?.groups[0].spells[0].ref, "srd-5.2:cone-of-cold");
 });
 
 test("2014 ranged weapon attack: range normal/long, no reach", () => {
