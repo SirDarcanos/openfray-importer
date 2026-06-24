@@ -59,5 +59,4 @@ using it in accordance with D&D Beyond's Terms of Use and applicable copyright l
 
 ## License
 
-[MIT](./LICENSE). Portions of the scraping code derive from earlier MIT-licensed
-work; the original copyright notice is retained in `LICENSE`.
+Released under the [MIT License](./LICENSE).
