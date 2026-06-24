@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body,
+html {
+  padding: 0;
+  margin: 0;
+  height: 600px;
+  width: 430px;
+}
+
+/* OpenFray is dark-default; keep the popup chrome (scrollbars, caret) in step. */
+body {
+  background-color: #020617; /* slate-950 */
+  color: #f1f5f9; /* slate-100 */
+  color-scheme: dark;
+}

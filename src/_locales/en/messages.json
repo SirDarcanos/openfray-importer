@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "OpenFray Importer",
+    "description": "The name of the extension."
+  },
+  "appDescription": {
+    "message": "Scrape a D&D Beyond monster page and export OpenFray Creature JSON",
+    "description": "The description of the extension."
+  },
+  "btnTooltip": {
+    "message": "Export OpenFray Creature JSON",
+    "description": "Tooltip for the button."
+  }
+}
