@@ -26,6 +26,9 @@ import type {
   SkillBonuses,
   Speeds,
   SpellGroup,
+  SpellLevel,
+  SpellRef,
+  SpellSlots,
   Spellcasting,
   SpellUsage,
   Trait,
@@ -281,25 +284,52 @@ const TIER_MARKER_RE = /(at will|\d+\s*\/\s*day(?:\s+each)?)\s*:/gi;
 const isSpellcastingLeadIn = (e: NameAndContent): boolean =>
   /spellcasting/i.test(e.Name) || /spellcasting ability/i.test(e.Content);
 
-/** Compendium ref source for spell hover-cards, by edition. */
-const refSource = (edition: Edition): string =>
-  edition === "5.0" ? "srd-5.1" : "srd-5.2";
+/** Spell hover-cards / cast mechanics resolve against OpenFray's bundled compendium,
+ *  which ships only SRD 5.2 — so spell refs point there regardless of the creature's
+ *  edition (spell names are stable across editions; 5.1-only refs wouldn't resolve). */
+const SPELL_REF_SRC = "srd-5.2";
+
+// Words kept lowercase in a title-cased spell name ("Cone of Cold", "Wall of Force").
+const MINOR_WORD = new Set(["of", "the", "and", "a", "an", "to", "in", "on", "or", "from", "with"]);
+
+function titleCaseSpell(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((w, i) =>
+      i > 0 && MINOR_WORD.has(w.toLowerCase().replace(/[^a-z]/g, ""))
+        ? w.toLowerCase()
+        : w.charAt(0).toUpperCase() + w.slice(1),
+    )
+    .join(" ");
+}
+
+/** One spell reference from a raw list entry. The display name is title-cased (2014
+ *  blocks list spells lowercase; 2024 already capitalized) and keeps any trailing "*"
+ *  marker; the compendium ref slugs the de-asterisked name. */
+function spellRef(raw: string): SpellRef {
+  const display = titleCaseSpell(
+    raw.trim().replace(/\s*\([^)]*\)\s*$/, "").replace(/\.$/, "").trim(),
+  );
+  return {
+    name: display,
+    ref: `${SPELL_REF_SRC}:${slugify(display.replace(/\*+$/, "").trim())}`,
+  };
+}
+
+const toSpellRefs = (names: string[]): SpellRef[] =>
+  names.map((n) => n.trim()).filter(Boolean).map(spellRef);
 
 /** Split a "At Will: a, b 1/Day: c" blob into usage-grouped spells. Tolerates the
  *  tiers being run together by the scraper ("…Mage Hand, Message1/Day: Lightning Bolt"). */
-function parseSpellGroups(blob: string, refSrc: string): SpellGroup[] {
+function parseSpellGroups(blob: string): SpellGroup[] {
   const groups: SpellGroup[] = [];
   const markers = [...blob.matchAll(TIER_MARKER_RE)];
   for (let i = 0; i < markers.length; i++) {
     const header = markers[i][1].toLowerCase();
     const start = markers[i].index! + markers[i][0].length;
     const end = i + 1 < markers.length ? markers[i + 1].index! : blob.length;
-    const names = blob
-      .slice(start, end)
-      .split(",")
-      .map((s) => s.trim().replace(/\.$/, "").replace(/\s*\([^)]*\)$/, ""))
-      .filter(Boolean);
-    if (names.length === 0) continue;
+    const spells = toSpellRefs(blob.slice(start, end).split(","));
+    if (spells.length === 0) continue;
 
     let usage: SpellUsage;
     if (/at will/.test(header)) usage = { type: "atWill" };
@@ -307,10 +337,7 @@ function parseSpellGroups(blob: string, refSrc: string): SpellGroup[] {
       const per = /(\d+)\s*\/\s*day/.exec(header);
       usage = { type: "perDay", per: per ? Number(per[1]) : 1 };
     }
-    groups.push({
-      usage,
-      spells: names.map((name) => ({ name, ref: `${refSrc}:${slugify(name)}` })),
-    });
+    groups.push({ usage, spells });
   }
   return groups;
 }
@@ -324,7 +351,6 @@ function parseSpellGroups(blob: string, refSrc: string): SpellGroup[] {
  */
 function extractSpellcasting(
   entries: NameAndContent[],
-  edition: Edition,
 ): { spellcasting?: Spellcasting; rest: NameAndContent[] } {
   const idx = entries.findIndex(isSpellcastingLeadIn);
   if (idx < 0) return { rest: entries };
@@ -354,7 +380,7 @@ function extractSpellcasting(
   // Fallback: some layouts keep the whole list in the lead-in's own content.
   if (!blob.trim()) blob = leadIn.Content;
 
-  const groups = parseSpellGroups(blob, refSource(edition));
+  const groups = parseSpellGroups(blob);
   const rest = entries.filter((e) => !consumed.has(e));
 
   if (groups.length === 0 && !ability && saveDc == null) {
@@ -365,6 +391,79 @@ function extractSpellcasting(
   if (saveDc != null) spellcasting.saveDc = saveDc;
   if (toHit != null) spellcasting.toHit = toHit;
   return { spellcasting, rest };
+}
+
+// 2014 prepared-caster slot lines: "1st level (4 slots): detect magic, identify, …".
+const SLOT_LINE_RE = /(\d+)(?:st|nd|rd|th)\s+level\s*\(\s*(\d+)\s*slots?\s*\):\s*([^\n]+)/gi;
+const CANTRIP_RE = /cantrips?\s*\(at will\):\s*([^\n]+)/i;
+const AT_WILL_PHRASE_RE = /can (?:innately )?cast ([^.\n]+?) at will/i;
+
+/**
+ * Lift a 2014 spellcasting *trait* into a structured block. Two shapes:
+ *  - **Prepared/slot casters** (Archmage): "Cantrips (at will): …", "Nth level (M slots): …".
+ *    Cantrips + "can cast X at will" → an at-will group; each level → a `slots` group
+ *    with the per-level counts in `slots`.
+ *  - **Innate casters**: "At will: …", "N/Day Each: …" — same markers as 2024, so the
+ *    shared `parseSpellGroups` handles them (at-will / per-day groups).
+ * Returns the remaining (non-spellcasting) traits.
+ */
+function extractSpellcastingFromTraits(
+  traits: NameAndContent[],
+): { spellcasting?: Spellcasting; rest: NameAndContent[] } {
+  const idx = traits.findIndex(
+    (t) =>
+      /spellcasting/i.test(t.Name) &&
+      /spellcasting ability|spell save dc|\(\d+ slots?\)|at will/i.test(t.Content),
+  );
+  if (idx < 0) return { rest: traits };
+
+  const text = traits[idx].Content;
+  const ability =
+    ABILITY_BY_NAME[(/spellcasting ability is (\w+)/i.exec(text)?.[1] ?? "").toLowerCase()];
+  const saveDc = Number(/spell save DC (\d+)/i.exec(text)?.[1]) || undefined;
+  const toHit = (() => {
+    const m = /([+-]?\d+) to hit with spell/i.exec(text);
+    return m ? Number(m[1]) : undefined;
+  })();
+
+  const groups: SpellGroup[] = [];
+  const slots: SpellSlots = {};
+
+  if (/\(\s*\d+\s*slots?\s*\)/i.test(text)) {
+    const atWill: SpellRef[] = [];
+    const phrase = AT_WILL_PHRASE_RE.exec(text);
+    if (phrase) atWill.push(...toSpellRefs(phrase[1].split(/,|\band\b/i)));
+    const cantrips = CANTRIP_RE.exec(text);
+    if (cantrips) atWill.push(...toSpellRefs(cantrips[1].split(",")));
+    if (atWill.length) groups.push({ usage: { type: "atWill" }, spells: atWill });
+
+    for (const m of text.matchAll(SLOT_LINE_RE)) {
+      const level = Number(m[1]);
+      const spells = toSpellRefs(m[3].split(","));
+      if (spells.length === 0) continue;
+      groups.push({ usage: { type: "slots", level }, spells });
+      slots[String(level) as SpellLevel] = Number(m[2]);
+    }
+  } else {
+    groups.push(...parseSpellGroups(text));
+  }
+
+  if (groups.length === 0 && !ability && saveDc == null) return { rest: traits };
+  // Footnote lines ("*The archmage casts these spells on itself before combat.").
+  const note = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("*"))
+    .join(" ")
+    .trim();
+
+  const spellcasting: Spellcasting = { groups };
+  if (ability) spellcasting.ability = ability;
+  if (saveDc != null) spellcasting.saveDc = saveDc;
+  if (toHit != null) spellcasting.toHit = toHit;
+  if (Object.keys(slots).length) spellcasting.slots = slots;
+  if (note) spellcasting.note = note;
+  return { spellcasting, rest: traits.filter((_, i) => i !== idx) };
 }
 
 /** Convert one scraped power (Action/Reaction/Bonus/Legendary entry) into an Action. */
@@ -411,11 +510,27 @@ function toAction(entry: NameAndContent): Action {
 const namedActions = (entries: NameAndContent[] | undefined): Action[] =>
   (entries ?? []).filter((e) => e.Name.trim()).map(toAction);
 
+// A legendary action can cost more than one of the round's budget. DDB writes the
+// cost in the action name ("Ice Trick (Costs 2 Actions)") or, when the name is split
+// across two <strong>s, at the head of the body ("Misty Step" + "(Costs 2 Actions).").
+const LEGENDARY_COST_RE = /\(Costs?\s+(\d+)\s+Actions?\)\.?/i;
+
 function buildLegendary(
   entries: NameAndContent[] | undefined,
 ): LegendaryActions | undefined {
   const all = entries ?? [];
-  const actions = namedActions(all);
+  const actions = all
+    .filter((e) => e.Name.trim())
+    .map((entry) => {
+      const cost =
+        LEGENDARY_COST_RE.exec(entry.Name) ?? LEGENDARY_COST_RE.exec(entry.Content ?? "");
+      const action = toAction({
+        Name: entry.Name.replace(LEGENDARY_COST_RE, "").trim(),
+        Content: (entry.Content ?? "").replace(LEGENDARY_COST_RE, "").trim(),
+      });
+      if (cost) action.legendaryCost = Number(cost[1]);
+      return action;
+    });
   if (actions.length === 0) return undefined;
   // The intro paragraph ("can take 3 legendary actions") carries the per-round
   // budget; Open5e exposes none, so default to 3.
@@ -488,15 +603,19 @@ export function statBlockToCreature(sb: StatBlock, opts: ConvertOptions = {}): C
   if (cr != null) creature.cr = cr;
   if (sb.Xp != null) creature.xp = sb.Xp;
 
-  const traits: Trait[] = (sb.Traits ?? [])
+  // Spellcasting lives in a trait (2014) or an action (2024); lift whichever exists
+  // into a structured block and drop it from the rendered traits/actions.
+  const { spellcasting: traitSpellcasting, rest: restTraits } =
+    extractSpellcastingFromTraits(sb.Traits ?? []);
+  const traits: Trait[] = restTraits
     .filter((t) => t.Name.trim())
     .map((t) => ({ name: t.Name.trim(), text: t.Content.trim() }));
   if (traits.length) creature.traits = traits;
 
-  // Lift spellcasting into a structured block; the remaining entries become actions.
-  const { spellcasting, rest } = extractSpellcasting(sb.Actions ?? [], edition);
+  const { spellcasting: actionSpellcasting, rest } = extractSpellcasting(sb.Actions ?? []);
   const actions = namedActions(rest);
   if (actions.length) creature.actions = actions;
+  const spellcasting = actionSpellcasting ?? traitSpellcasting;
   if (spellcasting) creature.spellcasting = spellcasting;
   const bonus = namedActions(sb.BonusActions);
   if (bonus.length) creature.bonusActions = bonus;

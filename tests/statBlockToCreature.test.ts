@@ -248,6 +248,100 @@ test("2024 spellcasting: structured block, junk pseudo-actions removed", () => {
   );
 });
 
+test("2014 slot spellcasting (Archmage trait): structured slots + at-will, trait removed", () => {
+  const c = statBlockToCreature(
+    statBlock({
+      Name: "Archmage",
+      Type: "Medium Humanoid (Any Race), Any Alignment",
+      Abilities: { Str: 10, Dex: 14, Con: 12, Int: 20, Wis: 15, Cha: 16 },
+      Challenge: "12",
+      Traits: [
+        {
+          Name: "Magic Resistance",
+          Content: "The archmage has advantage on saving throws against spells and other magical effects.",
+        },
+        {
+          Name: "Spellcasting",
+          Content:
+            "The archmage is an 18th-level spellcaster. Its spellcasting ability is Intelligence (spell save DC 17, +9 to hit with spell attacks). The archmage can cast disguise self and invisibility at will and has the following wizard spells prepared:\n\n" +
+            "Cantrips (at will): fire bolt, light, mage hand, prestidigitation, shocking grasp\n\n" +
+            "1st level (4 slots): detect magic, identify, mage armor*, magic missile\n\n" +
+            "2nd level (3 slots): detect thoughts, mirror image, misty step\n\n" +
+            "3rd level (3 slots): counterspell, fly, lightning bolt\n\n" +
+            "9th level (1 slot): time stop\n\n" +
+            "*The archmage casts these spells on itself before combat.",
+        },
+      ],
+    }),
+  );
+
+  // The Spellcasting trait is lifted out; only Magic Resistance remains.
+  assert.deepEqual(c.traits?.map((t) => t.name), ["Magic Resistance"]);
+
+  const sc = c.spellcasting!;
+  assert.equal(sc.ability, "int");
+  assert.equal(sc.saveDc, 17);
+  assert.equal(sc.toHit, 9);
+
+  // At-will = the "can cast … at will" spells + cantrips, merged. Names are title-cased.
+  assert.deepEqual(sc.groups[0].usage, { type: "atWill" });
+  assert.deepEqual(sc.groups[0].spells.map((s) => s.name), [
+    "Disguise Self", "Invisibility",
+    "Fire Bolt", "Light", "Mage Hand", "Prestidigitation", "Shocking Grasp",
+  ]);
+
+  // First slot group: 1st level; the "*" marker is kept on the display name but the
+  // ref slugs the de-asterisked name.
+  assert.deepEqual(sc.groups[1].usage, { type: "slots", level: 1 });
+  assert.deepEqual(sc.groups[1].spells.map((s) => s.name), [
+    "Detect Magic", "Identify", "Mage Armor*", "Magic Missile",
+  ]);
+  assert.equal(sc.groups[1].spells[2].ref, "srd-5.2:mage-armor");
+
+  // Per-level slot maxes.
+  assert.deepEqual(sc.slots, { "1": 4, "2": 3, "3": 3, "9": 1 });
+
+  // The footnote line is preserved as a note.
+  assert.equal(sc.note, "*The archmage casts these spells on itself before combat.");
+});
+
+test("legendary actions: per-round budget + (Costs N Actions) in name or split body", () => {
+  // As the (fixed) scraper yields them for Jack Frost: a heading-less intro
+  // paragraph, then named actions — one with the cost in its name, one with the
+  // cost split into the body (the name was a separate <strong>).
+  const c = statBlockToCreature(
+    statBlock({
+      Name: "Jack Frost",
+      Type: "Medium Fey, Chaotic Good",
+      Challenge: "9",
+      LegendaryActions: [
+        {
+          Name: "",
+          Content:
+            "Jack Frost can take 3 legendary actions, choosing from the options below. Only one legendary action option can be used at a time and only at the end of another creature's turn. Jack Frost regains spent legendary actions at the start of its turn.",
+        },
+        { Name: "Staff", Content: "Jack Frost makes a Staff attack." },
+        { Name: "Ice Trick (Costs 2 Actions)", Content: "Jack Frost uses his Ice Trick action." },
+        {
+          Name: "Misty Step",
+          Content:
+            "(Costs 2 Actions). A gust of frozen wind magically teleports Jack Frost in a free spot within 60 ft.",
+        },
+      ],
+    }),
+  );
+
+  const la = c.legendaryActions!;
+  assert.equal(la.perRound, 3);
+  assert.deepEqual(la.actions.map((a) => a.name), ["Staff", "Ice Trick", "Misty Step"]);
+  assert.equal(la.actions[0].legendaryCost, undefined);
+  assert.equal(la.actions[1].legendaryCost, 2);
+  assert.equal(la.actions[2].legendaryCost, 2);
+  // The cost marker is stripped from the displayed prose, not left in the text.
+  assert.match(la.actions[2].text!, /^A gust of frozen wind/);
+  assert.doesNotMatch(la.actions[1].name, /Costs/);
+});
+
 test("2014 ranged weapon attack: range normal/long, no reach", () => {
   const c = statBlockToCreature(
     statBlock({

@@ -225,7 +225,7 @@ function getPowers(element: Cash, type: string): NameAndContent[] {
   const section = getPowerSection(element, type);
 
   const powerEntries = section
-    .children("p")
+    .find(".mon-stat-block__description-block-content p")
     .get()
     .map((el) => {
       const contentNode = cash(el).clone();
@@ -261,28 +261,23 @@ function collapsePowerDescriptions(powerEntries: NameAndContent[]) {
   }, []);
 }
 
+// A section is a description block identified by its own heading (Traits is the
+// leading block, which may carry a "Traits" heading or none). Match on the block's
+// heading and let getPowers pull descendant <p> at any depth: some DDB pages
+// (partnered / homebrew) wrap a section's content in a second nested
+// `description-block-content`. Selecting content divs by .parent() then missed the
+// nested copy entirely (legendary actions vanished) and mis-filed it under the
+// heading-less Traits scan.
 function getPowerSection(element: Cash, type: string) {
-  if (type == "Traits") {
-    return element
-      .find(".mon-stat-block__description-block-content")
-      .filter(
-        (i, e) =>
-          cash(e).parent().has(".mon-stat-block__description-block-heading")
-            .length == 0 ||
-          cash(e)
-            .parent()
-            .find(".mon-stat-block__description-block-heading")
-            .text() == "Traits"
-      );
-  }
-
   return element
-    .find(".mon-stat-block__description-block-content")
-    .filter(
-      (i, e) =>
-        cash(e)
-          .parent()
-          .find(".mon-stat-block__description-block-heading")
-          .text() == type
-    );
+    .find(".mon-stat-block__description-block")
+    .filter((i, e) => {
+      const heading = cash(e)
+        .children(".mon-stat-block__description-block-heading")
+        .first()
+        .text()
+        .trim();
+      if (type == "Traits") return heading == "" || heading == "Traits";
+      return heading == type;
+    });
 }
