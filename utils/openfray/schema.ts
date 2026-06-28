@@ -115,7 +115,13 @@ export interface Trait {
   text: string;
 }
 
-export type SpellUsage = { type: "atWill" } | { type: "perDay"; per: number };
+export type SpellUsage =
+  | { type: "atWill" }
+  | { type: "perDay"; per: number }
+  | { type: "slots"; level: number };
+
+export type SpellLevel = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+export type SpellSlots = Partial<Record<SpellLevel, number>>;
 
 export interface SpellRef {
   name: string;
@@ -134,6 +140,10 @@ export interface Spellcasting {
   saveDc?: number;
   toHit?: number;
   groups: SpellGroup[];
+  /** Per-level slot maxes for the 2014 slot model. */
+  slots?: SpellSlots;
+  /** A trailing note from the stat block (e.g. "*casts these on itself before combat"). */
+  note?: string;
 }
 
 export interface LegendaryActions {
