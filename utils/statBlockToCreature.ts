@@ -281,8 +281,15 @@ function parseSave(text: string): SaveRequirement | null {
 const TIER_NAME_RE = /^(at will|\d+\s*\/\s*day(?:\s+each)?)\s*:?$/i;
 const TIER_MARKER_RE = /(at will|\d+\s*\/\s*day(?:\s+each)?)\s*:/gi;
 
+// The real Spellcasting lead-in is named "Spellcasting", or its content *defines*
+// the ability ("using Intelligence as the spellcasting ability" / "spellcasting
+// ability is Intelligence"). An action that only *references* it ("…using the same
+// spellcasting ability as Spellcasting" — Evocation Barrage, Protective Magic) must
+// NOT match, or findIndex lands on it and the block never gets parsed.
 const isSpellcastingLeadIn = (e: NameAndContent): boolean =>
-  /spellcasting/i.test(e.Name) || /spellcasting ability/i.test(e.Content);
+  /spellcasting/i.test(e.Name) ||
+  /using \w+ as the spellcasting ability/i.test(e.Content) ||
+  /spellcasting ability is \w+/i.test(e.Content);
 
 /** Spell hover-cards / cast mechanics resolve against OpenFray's bundled compendium,
  *  which ships both SRD 5.2 (2024) and SRD 5.1 (2014). Point a creature's spells at the

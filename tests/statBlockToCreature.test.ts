@@ -248,6 +248,40 @@ test("2024 spellcasting: structured block, junk pseudo-actions removed", () => {
   );
 });
 
+test("2024 spellcasting: a preceding action that references the ability doesn't shadow the block", () => {
+  // Evoker Archmage: "Evocation Barrage" and the "Protective Magic" reaction both say
+  // "…using the same spellcasting ability as Spellcasting", which used to trip the
+  // lead-in finder before it reached the real "Spellcasting" action.
+  const c = statBlockToCreature(
+    statBlock({
+      Name: "Evoker Archmage",
+      Type: "Medium Humanoid, Neutral",
+      Abilities: { Str: 10, Dex: 16, Con: 12, Int: 20, Wis: 15, Cha: 16 },
+      Actions: [
+        { Name: "Multiattack", Content: "The archmage makes four Arcane Burst attacks. It can replace one attack with a use of Spellcasting to cast Shatter." },
+        { Name: "Arcane Burst", Content: "Melee or Ranged Attack Roll: +10, reach 5 ft. or range 150 ft. Hit: 27 (4d10 + 5) Force damage." },
+        { Name: "Evocation Barrage", Content: "The archmage casts Fireball, Ice Storm, or Lightning Bolt twice in any combination, using the same spellcasting ability as Spellcasting." },
+        { Name: "Spellcasting", Content: "The archmage casts one of the following spells, using Intelligence as the spellcasting ability (spell save DC 18):" },
+        { Name: "At Will:", Content: "Detect Magic, Mage Armor (included in AC), Mage Hand, Prestidigitation, Shatter (level 3 version)" },
+      ],
+      Reactions: [
+        { Name: "Protective Magic", Content: "The archmage casts Counterspell or Shield in response to the spell's trigger, using the same spellcasting ability as Spellcasting." },
+      ],
+    }),
+  );
+
+  // The real Spellcasting block is parsed; the referencing actions are left intact.
+  assert.equal(c.spellcasting?.ability, "int");
+  assert.equal(c.spellcasting?.saveDc, 18);
+  assert.deepEqual(c.spellcasting?.groups[0].usage, { type: "atWill" });
+  assert.deepEqual(
+    c.spellcasting?.groups[0].spells.map((s) => s.name),
+    ["Detect Magic", "Mage Armor", "Mage Hand", "Prestidigitation", "Shatter"],
+  );
+  // Multiattack, Arcane Burst, and Evocation Barrage remain real actions.
+  assert.deepEqual(c.actions?.map((a) => a.name), ["Multiattack", "Arcane Burst", "Evocation Barrage"]);
+});
+
 test("2014 slot spellcasting (Archmage trait): structured slots + at-will, trait removed", () => {
   const c = statBlockToCreature(
     statBlock({
