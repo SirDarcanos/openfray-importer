@@ -21,6 +21,17 @@ npm run build:firefox   # Firefox → output/firefox-mv2
 - **Firefox:** `about:debugging` → This Firefox → **Load Temporary Add-on** →
   `output/firefox-mv2/manifest.json`.
 
+## Package for the stores
+
+```bash
+npm run zip           # Chrome  → output/openfray-ddb-import-<version>-chrome.zip
+npm run zip:firefox   # Firefox → output/openfray-ddb-import-<version>-firefox.zip
+```
+
+Always use these, never the Finder's **Compress** on the build folder: macOS writes
+resource-fork siblings into the archive (`__MACOSX/._*`), and AMO flags every one of
+them as a hidden file.
+
 Then open a monster's Details page on D&D Beyond and click the extension.
 
 ## Develop
