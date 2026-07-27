@@ -39,23 +39,62 @@ source archive AMO asks for alongside the build.
 
 The shipped files are generated, so they can't be read as-is: **[wxt](https://wxt.dev)**
 bundles the TypeScript/React sources with Vite and Rollup, minifies them with esbuild
-in production, and compiles the styles with Tailwind and PostCSS. Nothing else
-preprocesses the code, and no code is fetched or evaluated at runtime.
+in production, and compiles the styles with Tailwind and PostCSS. It also generates
+`manifest.json`. Nothing else preprocesses the code, and no code is downloaded or
+evaluated at runtime.
 
-To reproduce the exact files in the submitted package from the source archive:
+### Build environment
+
+- **Operating system:** any that runs Node — built and verified on macOS 26.5
+  (Apple silicon); Linux and Windows work equally well. The build script needs a
+  POSIX shell, so on Windows use WSL or Git Bash, or run the two npm commands below
+  directly.
+- **Node.js 18 or newer** — verified on **24.15.0**. Install from
+  <https://nodejs.org/en/download> (LTS installer), or with
+  [nvm](https://github.com/nvm-sh/nvm): `nvm install 24 && nvm use 24`.
+- **npm 9 or newer** — verified on **11.12.1**. It ships with Node, so installing
+  Node is enough; `npm install -g npm@latest` upgrades it.
+- **No other tools are required** — no compilers, no global packages, no network
+  access beyond the npm registry.
+
+### Build
+
+```bash
+bash scripts/build.sh         # Firefox → output/firefox-mv2
+```
+
+(Invoked via `bash` because zip archives don't carry the executable bit.)
+
+That script is the whole process: it checks the Node version, runs `npm ci`, and
+builds. If you'd rather run the steps yourself, they are exactly:
 
 ```bash
 npm ci
-npm run build:firefox   # → output/firefox-mv2
+npm run build:firefox
 ```
 
-Built with **Node 24.15.0** and **npm 11.12.1** on macOS; any OS with Node 18+ works.
-`npm ci` installs the exact versions in `package-lock.json`, and the build is
-deterministic — it reproduces `output/firefox-mv2` byte for byte.
+`npm ci` installs the exact versions pinned in `package-lock.json` (and runs
+`wxt prepare`, which generates the TypeScript types under `.wxt/`). The build is
+deterministic: from this archive it reproduces the submitted `output/firefox-mv2`
+byte for byte.
 
-Where to read the code: the popup UI is `components/`, the page scraping is
-`utils/extractstatblock.ts` (2014 layout) and `utils/get2024statblock.ts` (2024), and
+### Where to read the code
+
+The popup UI is `components/`; the page scraping is `utils/extractstatblock.ts`
+(2014 stat-block layout) and `utils/get2024statblock.ts` (2024); and
 `utils/statBlockToCreature.ts` maps a scraped block into OpenFray's schema.
+`npm test` runs the converter's unit tests.
+
+### A note on `npm audit`
+
+`npm ci` reports advisories in the build toolchain — `wxt`'s browser-launching dev
+runner (`web-ext-run`, `fx-runner`, `firefox-profile`) and its template downloader
+(`giget`, `tar`). These are **devDependencies used only to build and to run a local
+dev browser; none of them is part of the extension**. The three packages that ship
+inside the bundle are `react`, `react-dom`, and `cash-dom`, none of which has an
+advisory. Upgrading `wxt` to the current major doesn't clear them either — the same
+transitive chain comes along — so the lockfile keeps the versions this build was
+verified against.
 
 Then open a monster's Details page on D&D Beyond and click the extension.
 
