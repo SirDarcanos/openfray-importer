@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Creature } from "@/utils/openfray/schema";
 import { Container } from "./Container";
 import { Brand } from "./Brand";
+import { OptionsButton } from "./OptionsButton";
 
 export function Importer(props: {
   creature: Creature;
@@ -28,13 +29,16 @@ export function Importer(props: {
 
   return (
     <Container>
-      <Brand subtitle="Importer" />
-      <div className="flex min-h-0 flex-grow flex-col">
-        <h3 className="truncate font-semibold text-slate-200">{props.creature.name}</h3>
-        <pre className="mt-1 min-h-0 flex-grow overflow-y-auto rounded-md border border-slate-800 bg-slate-900 p-2 font-mono text-xs text-slate-300">
+      <Brand subtitle="Importer" action={<OptionsButton onClick={() => props.setShowOptions(true)} />} />
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* shrink-0 on the name and buttons, flex-1 (basis 0) on the JSON: with the
+            default auto basis a long stat block sizes the <pre> to its content and
+            squeezes its siblings — the name was clipped, or gone entirely. */}
+        <h3 className="shrink-0 truncate font-semibold text-slate-200">{props.creature.name}</h3>
+        <pre className="mt-1 min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-900 p-2 font-mono text-xs text-slate-300">
           {json}
         </pre>
-        <div className="flex flex-row gap-2 pt-3">
+        <div className="flex shrink-0 flex-row gap-2 pt-3">
           <button
             onClick={copy}
             className="flex-grow rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
@@ -49,13 +53,6 @@ export function Importer(props: {
           </button>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={() => props.setShowOptions(true)}
-        className="self-end text-xs font-medium text-indigo-400 hover:text-indigo-300"
-      >
-        Options
-      </button>
     </Container>
   );
 }

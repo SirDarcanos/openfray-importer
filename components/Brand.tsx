@@ -1,9 +1,10 @@
 import { CrossedSwordsIcon } from "./CrossedSwordsIcon";
 
-/** The OpenFray brand lockup: crossed swords + two-tone wordmark, with a subtitle. */
-export function Brand({ subtitle }: { subtitle?: string }) {
+/** The OpenFray brand lockup: crossed swords + two-tone wordmark, with a subtitle.
+ *  `action` sits at the right end of the header row (the Options cog). */
+export function Brand({ subtitle, action }: { subtitle?: string; action?: any }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex shrink-0 items-center gap-2">
       <span className="text-indigo-400">
         <CrossedSwordsIcon className="h-6 w-6" />
       </span>
@@ -17,6 +18,7 @@ export function Brand({ subtitle }: { subtitle?: string }) {
           </div>
         )}
       </div>
+      {action && <div className="ml-auto">{action}</div>}
     </div>
   );
 }
